@@ -1,0 +1,617 @@
+---
+title: "Upstream analysis of amplicon based on qiime2 platform"
+author:
+  - ChaoChang
+documentclass: ctexart
+keywords:
+  - qiime2
+  - amplicon,R
+
+geometry: "left=1cm,right=1cm,top=2cm,bottom=2cm"
+output:
+  rticles::ctex:
+    fig_caption: yes
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+---
+
+# software installation
+## isntall miniconda
+
+
+```{r eval=FALSE}
+
+wget -c https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh
+```
+
+```{r eval=FALSE}
+
+```
+
+## Modify the conda configuration file
+
+
+```{r eval=FALSE}
+auto_activate_base: false
+show_channel_urls: true
+report_errors: false
+
+channels:
+  - defaults
+  - bioconda
+  - conda-forge
+default_channels:
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main
+custom_channels:
+  conda-forge: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud
+  bioconda: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud
+  qiime2: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud
+  msys2: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud
+  menpo: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud
+  pytorch: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud
+  pytorch-lts: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud
+  simpleitk: https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud
+```
+
+
+
+
+
+## install qiime2
+
+```{r eval=FALSE}
+mamba env create -n qiime2-2022.2 --file qiime2-2022.2-py38-linux-conda.yml
+```
+
+
+## Download and import the database
+
+
+
+```{r eval=FALSE}
+mamba activate qiime2-2022.2
+```
+
+### Greengenes(13_8)
+
+```{r eval=FALSE}
+## 数据库来源: https://docs.qiime2.org/2022.2/data-resources/
+## 下载并解压
+wget -c \
+  ftp://greengenes.microbio.me/greengenes_release/gg_13_5/gg_13_8_otus.tar.gz
+tar xf gg_13_8_otus.tar.gz
+
+## 改造taxon文件, 使其符合基本要求
+sed -i "1iFeature ID\tTaxon" gg_13_8_otus/taxonomy/99_otu_taxonomy.txt
+
+## 导入taxon注释文件
+qiime tools import \
+  --type 'FeatureData[Taxonomy]' \
+  --input-format TSVTaxonomyFormat \
+  --input-path  gg_13_8_otus/taxonomy/99_otu_taxonomy.txt \
+  --output-path gg_13_8_taxon.qza
+
+## 导入fasta序列
+qiime tools import \
+  --input-path gg_13_8_otus/rep_set/99_otus.fasta \
+  --type 'FeatureData[Sequence]' \
+  --output-path gg_13_8_seqs.qza
+```
+
+### SILVA(release 138)
+
+这个数据下载下来时, 就已经是qiime2的格式了, **不需要**再进行改造和转换为qiime2格式了,**我们主要使用该数据库**
+
+```{r eval=FALSE}
+# 数据库来源: https://docs.qiime2.org/2022.2/data-resources/
+wget -c https://data.qiime2.org/2022.2/common/silva-138-99-seqs.qza
+wget -c https://data.qiime2.org/2022.2/common/silva-138-99-tax.qza
+```
+
+### UNITE数据库
+
+```{r eval=FALSE}
+## 数据库来源: https://unite.ut.ee/repository.php
+## 访问 https://plutof.ut.ee/#/doi/10.15156/BIO/1264763 , 点击下载, 填写信息
+## 此处假定下载的文件名为 unite.tgz
+## 解压
+tar xf unite.tgz
+
+## 改造taxon文件, 使其符合基本要求
+sed -i "1iFeature ID\tTaxon" \
+  unite/developer/sh_taxonomy_qiime_ver8_dynamic_s_10.05.2021_dev.txt
+
+## 导入taxon注释文件
+qiime tools import \
+  --type 'FeatureData[Taxonomy]' \
+  --input-format TSVTaxonomyFormat \
+  --input-path  unite/developer/sh_taxonomy_qiime_ver8_dynamic_s_10.05.2021_dev.txt \
+  --output-path unite_taxon.qza
+
+##导入fasta参考序列
+qiime tools import \
+  --input-path unite/developer/sh_refs_qiime_ver8_dynamic_s_10.05.2021_dev.fasta \
+  --type 'FeatureData[Sequence]' \
+  --output-path unite_seqs.qza
+
+## 在真菌中为原始的 unite_seqs.qza
+qiime feature-classifier fit-classifier-naive-bayes \
+--i-reference-reads unite_seqs.qza \
+--i-reference-taxonomy unite_taxon.qza \
+--o-classifier classifier-unite.qza
+```
+
+### Pr2数据库
+```{r eval=FALSE}
+## 导入taxon注释文件
+qiime tools import \
+--type 'FeatureData[Taxonomy]' \
+--input-format HeaderlessTSVTaxonomyFormat   \
+--input-path pr2_version_4.14.0_SSU_mothur.tax \
+--output-path pr2_taxon.qza
+
+##导入fasta参考序列
+qiime tools import \
+--type 'FeatureData[Sequence]' \
+--input-path pr2_version_4.14.0_SSU_mothur.fasta \
+--output-path pr2_seqs.qza
+
+##18s v3-v4
+export primer_f=CGCGGTAATTCCAGCTCCA
+export primer_r=TTGGYRAATGCTTTCGC
+
+qiime feature-classifier extract-reads \
+--i-sequences pr2_seqs.qza \
+--p-f-primer $primer_f \
+--p-r-primer $primer_r \
+--o-reads pr2_ref_seqs.qza
+
+qiime feature-classifier fit-classifier-naive-bayes \
+--i-reference-reads pr2_ref_seqs.qza \
+--i-reference-taxonomy pr2_taxon.qza \
+--o-classifier classifier-pr2.qza
+```
+
+
+## 构建特异性注释文件
+
+### 截取参考序列
+
+截取序列的目的是为了提高注释器的敏感性，但此处需要注意一点，**真菌**是**不需要**进行裁剪的, 只有**细菌**才**需要**裁剪
+
+
+```{r eval=FALSE}
+# 声明前后引物(根据你实际的来设定)
+
+## 由于后续操作方法基本相同, 故统一
+## 以silva/silva-138-99-seqs.qz代指原始长度的细菌参考序列, 
+## 以seqs.qza代指裁剪过的细菌参考序列，或者原始的真菌参考序列
+## 以taxon.qza 代指注释文件
+
+## 16s v4区 蓝藻特异性引物
+export primer_f=GGGGAATYTTCCGCAATGGG
+export primer_r=GACTACWGGGGTATCTAATCCCWTT
+## 16s v4-v5区 515F-926R
+export primer_f=GTGYCAGCMGCCGCGGTAA
+export primer_r=CCGYCAATTYMTTTRAGTTT
+## 18s v9区 1380F-1510R
+export primer_f=CCCTGCCHTTTGTACACAC
+export primer_r=CCTTCYGCAGGTTCACCTAC
+## 18s v3-V4区 1380F-1510R
+export primer_f=CGCGGTAATTCCAGCTCCA
+export primer_r=TTGGYRAATGCTTTCGC
+```
+```{r eval=FALSE}
+
+qiime feature-classifier extract-reads \
+    --i-sequences /data/db/amplicon/silva-138-99-seqs.qza \
+    --p-f-primer $primer_f \
+    --p-r-primer $primer_r \
+    --p-min-length 50 \
+    --p-max-length 500 \
+    --o-reads seqs.qza
+```
+### 只保留细菌序列
+```{r eval=FALSE}
+qiime taxa filter-seqs \
+    --i-sequences seqs.qza \
+    --i-taxonomy /data/db/amplicon/silva-138-99-tax.qza \           
+    --p-include Bacteria \
+    --o-filtered-sequences ref-seqs-Bacteria.qza
+```
+### 安装依赖
+```{r eval=FALSE}
+conda install -c conda-forge -c bioconda -c qiime2 -c defaults xmltodict
+pip install git+https://github.com/bokulich-lab/RESCRIPt.git
+```
+### 只保留细菌注释信息
+```{r eval=FALSE}
+qiime rescript filter-taxa \
+    --i-taxonomy /data/db/amplicon/silva-138-99-tax.qza \
+    --m-ids-to-keep-file ref-seqs-Bacteria.qza \
+    --o-filtered-taxonomy ref-seqs-Bacteria-tax.qza
+```
+
+**构建注释器**注意注意:**细菌**输入的是**裁剪后**的参考序列，**真菌**输入的是**原始**的参考序列，若是使用515F-970R此对引物可直接从官网下载
+
+### 构建注释文件
+```{r eval=FALSE}
+# seqs.qza 在细菌注释器中为 修剪后的 seqs_trim.qza,
+# 在真菌中为原始的unite_seqs.qza
+# 耗费时间1.5h
+qiime feature-classifier fit-classifier-naive-bayes \
+    --i-reference-reads ref-seqs-Bacteria.qza \
+    --i-reference-taxonomy ref-seqs-Bacteria-tax.qza \
+    --o-classifier classifier-Bacteria.qza
+```
+
+
+
+###蓝细菌
+```{r eval=FALSE}
+#蓝藻特异性引物v4区
+export primer_f=GGGGAATYTTCCGCAATGGG
+export primer_r=GACTACWGGGGTATCTAATCCCWTT
+
+qiime feature-classifier extract-reads \
+--i-sequences silva-138-99-seqs.qza \
+--p-f-primer $primer_f \
+--p-r-primer $primer_r \
+--p-min-length 50 \
+--p-max-length 500 \
+--o-reads seqs1.qza
+
+
+#只保留细菌序列
+qiime taxa filter-seqs \
+--i-sequences seqs1.qza \
+--i-taxonomy silva-138-99-tax.qza \
+--p-include Bacteria \
+--o-filtered-sequences ref-seqs-cyanobacteria.qza
+
+
+#只保留细菌注释信息
+qiime rescript filter-taxa \
+--i-taxonomy silva-138-99-tax.qza \
+--m-ids-to-keep-file ref-seqs-cyanobacteria.qza \
+--o-filtered-taxonomy ref-seqs-cyanobacteria-tax.qza
+```
+
+
+经过上述步骤我们终于做好了全部的准备工作，安装好了分析软件，构建好了特异性注释文件;下面开始真正的数据分析实战环节
+
+# 数据分析前处理
+
+在获得测序数据后, 我们需要首先对数据进行质量检测, 看看测序质量如何, 这里主要用的的检测软件为fastqc和multiqc。
+根据笔者的经验, 一般微生物真菌its在测序时会产生大量的接头序列, 这对后续分析产生较大的影响, 需要去掉。由于扩增子分析中dada2会自己质控, 不需要提前质控, 因此笔者通常会在检测之后, 用fastp软件去接头, 并删掉尾部最后一个碱基, 不对序列做其他的质控, 以防影响后续dada2的质控算法。
+
+## conda安装相关软件, 并激活环境
+```{r eval=FALSE}
+
+mamba create -n bio fastp fastqc multiqc tree parallel -y
+mamba activate bio
+```
+
+## 创建分析目录
+```{r eval=FALSE}
+
+mkdir -p \
+  0.report/{raw_fq,raw_fq_mq,clean_fp,clean_fp_mq,clean_fq,clean_fq_mq}
+mkdir 1.raw
+mkdir 2.clean
+```
+
+## 查看文件
+```{r eval=FALSE}
+
+tree 16s
+# 16s
+# └── 1.raw
+#     ├── A1_1.fq.gz
+#     ├── A1_2.fq.gz
+#     ├── A2_1.fq.gz
+#     ├── A2_2.fq.gz
+#     ├── A3_1.fq.gz
+#     └── A3_2.fq.gz
+# 
+# 1 directory, 6 files
+```
+
+#查看原始数据质量
+```{r eval=FALSE}
+#### fastqc, multiqc查看原始测序数据质量(主要查看0.report/raw_fq_mq文件夹的文件)
+fastqc 1.raw/* -t 8 -o 0.report/raw_fq
+multiqc 0.report/raw_fq -o 0.report/raw_fq_mq
+```
+
+
+## fastp去除接头
+```{r eval=FALSE}
+笔者这里采用了parallel软件进行并行操作, 当然也可以使用for循环进行
+parallel \
+    -j 10 \
+    --max-args=2 \
+    fastp \
+        --thread 8 \
+        --in1 "{1}" \
+        --in2 "{2}" \
+        --out1 "./2.clean/{1/}" \
+        --out2 "./2.clean/{2/}" \
+        --disable_quality_filtering \
+        --disable_length_filtering \
+        --disable_trim_poly_g \
+        --detect_adapter_for_pe \
+        -t 1 \
+        -h "./0.report/clean_fp/{1/}".fastp.html \
+        -j "./0.report/clean_fp/{1/}".fastp.json \
+    ::: ./1.raw/*gz
+```
+```ymal
+- -j parallel并行数
+- --max-args 一次为parallel传入几个参数
+- --thread fastp软件调用线程数
+- --in1 --in2 输入的正反向序列
+- --out1 --out2 输出的正反向序列
+- --disable_quality_filtering 关闭质控
+- --disable_length_filtering 关闭长度质控
+- --disable_trim_poly_g 关闭poly g质控
+- --detect_adapter_for_pe 开启双端接头检测
+- -t 尾部删除碱基数目
+- -h -j 输出报告名称
+- ::: ./1.raw/*gz 表示 `./1.raw/*gz`为parallel的传入文件
+```
+## 查看去接头后数据质量
+```{r eval=FALSE}
+# 对去接头后的序列质检看看(主要查看0.report/clean_fq_mq文件夹的文件)
+multiqc 0.report/clean_fp -o 0.report/clean_fp_mq
+fastqc 2.clean/* -o 0.report/clean_fq
+multiqc 0.report/clean_fq -o 0.report/clean_fq_mq
+```
+
+## 构建数据清单
+
+```{r eval=FALSE}
+echo "sample-id" > tmp.mani.id
+echo "forward-absolute-filepath" > tmp.mani.f
+echo "reverse-absolute-filepath" > tmp.mani.r
+find 2.clean/*1.fq.gz -print0 | xargs -0 -I "," basename , _1.fq.gz >> tmp.mani.id
+find 2.clean/*1.fq.gz -print0 | xargs -0 -I "," echo "$PWD/," >> tmp.mani.f
+find 2.clean/*2.fq.gz -print0 | xargs -0 -I "," echo "$PWD/," >> tmp.mani.r
+paste tmp.mani.id tmp.mani.f tmp.mani.r > manifest
+rm tmp.mani*
+```
+
+## 查看清单
+
+less manifest
+
+```{r eval=FALSE}
+sample-id       forward-absolute-filepath       reverse-absolute-filepath
+A1      /home/users/wd/2.clean/A1_1.fq.gz   /home/users/wd/2.clean/A1_2.fq.gz
+A2      /home/users/wd/2.clean/A2_1.fq.gz   /home/users/wd/2.clean/A2_2.fq.gz
+A3      /home/users/wd/2.clean/A3_1.fq.gz   /home/users/wd/2.clean/A3_2.fq.gz
+```
+
+## 查看文件类型
+
+```{r eval=FALSE}
+less ./1.raw/A_1.fq|head -n 1000 | awk '{if(NR%4==0) printf("%s",$0);}' \
+| od -A n -t u1 -v \
+| awk 'BEGIN{min=100;max=0;} \
+{for(i=1;i<=NF;i++) {if($i>max) max=$i; if($i<min) min=$i;}}END \
+{if(max<=126 && min<59) print "Phred33"; \
+else if(max>73 && min>=64) print "Phred64"; \
+else if(min>=59 && min<64 && max>73) print "Solexa64"; \
+else print "Unknown score encoding"; \
+print "( " min ", " max, ")";}'
+```
+```{r eval=FALSE}
+Phred33
+(44,70)
+```
+
+# 导入qiime2分析
+
+```{r eval=FALSE}
+# 激活qiime2环境
+mamba activate qiime2-2022.2
+# 导入
+mkdir -p 2_table-rep
+qiime tools import \
+    --type 'SampleData[PairedEndSequencesWithQuality]' \
+    --input-format PairedEndFastqManifestPhred33V2 \
+    --input-path manifest \
+    --output-path 2_table-rep/1.demux.qza
+```
+
+## 切除引物
+```{r eval=FALSE}
+# 声明前后引物(根据你实际的引物来设定)
+# 常用引物
+## 16s v4区 蓝藻特异性引物
+export primer_f=GGGGAATYTTCCGCAATGGG
+export primer_r=GACTACWGGGGTATCTAATCCCWTT
+## 16s v4-v5区 515F-926R
+export primer_f=GTGYCAGCMGCCGCGGTAA
+export primer_r=CCGYCAATTYMTTTRAGTTT
+## 18s v9区 1380F-1510R
+export primer_f=CCCTGCCHTTTGTACACAC
+export primer_r=CCTTCYGCAGGTTCACCTAC
+## 18s v3-V4区 1380F-1510R
+export primer_f=CGCGGTAATTCCAGCTCCA
+export primer_r=TTGGYRAATGCTTTCGC
+# 这里设定错误率为0.2, 最少overlap为10bp, 去除低于50bp的reads, 去除无法匹配的reads
+qiime cutadapt trim-paired \
+    --i-demultiplexed-sequences 2_table-rep/1.demux.qza \
+    --p-cores 20 \
+    --p-error-rate 0.2 \
+    --p-overlap 10 \
+    --p-front-f $primer_f \
+    --p-front-r $primer_r \
+    --p-minimum-length 50 \
+    --p-discard-untrimmed \
+    --o-trimmed-sequences 2_table-rep/2.trim.qza
+
+# 可视化序列质量情况(以qiime2的角度来看数据测序质量)
+# (qzv结果文件可以在 https://view.qiime2.org/ 进行可视化)
+parallel \
+    -j 10 \
+    qiime demux summarize \
+        --i-data "{}" \
+        --o-visualization "{}".qzv \
+    ::: 2_table-rep/*qza &
+```
+
+## dada2降噪、质控、双端合并、去嵌合体
+
+```{r eval=FALSE}
+# 这里由于我们前面用fastp做了去除接头的工作, 一般序列两端都比较干净, 
+# 所以我这里设定了正反序列都不进行长度裁剪
+qiime dada2 denoise-paired \
+    --i-demultiplexed-seqs 2_table-rep/2.trim.qza \
+    --p-n-threads 60 \
+    --p-max-ee-f 2 \
+    --p-max-ee-r 4 \
+    --p-trunc-len-r 0 \
+    --p-trunc-len-f 0 \
+    --o-table 2_table-rep/table.qza \
+    --o-representative-sequences 2_table-rep/rep-seqs.qza \
+    --o-denoising-stats 2_table-rep/3.stats.qza
+
+# dada2 结果可视化(qzv结果文件可以在 https://view.qiime2.org/ 进行可视化)
+qiime metadata tabulate \
+    --m-input-file 2_table-rep/3.stats.qza \
+    --o-visualization 2_table-rep/3.stats.qza.qzv
+qiime feature-table summarize \
+    --i-table 2_table-rep/table.qza \
+    --o-visualization 2_table-rep/table.qza.qzv
+
+```
+
+## 序列去冗余
+```{r eval=FALSE}
+qiime vsearch cluster-features-de-novo \      
+    --i-table 2_table-rep/table.qza \
+    --i-sequences 2_table-rep/rep-seqs.qza \
+    --p-perc-identity 1\
+    --o-clustered-table 2_table-rep/table-dn-99.qza \
+    --o-clustered-sequences 2_table-rep/rep-seqs-dn-99.qza \
+    --p-threads 60
+```
+## 序列注释
+```{r eval=FALSE}
+mkdir 4_taxon
+qiime feature-classifier classify-sklearn \
+--i-classifier /data/db/amplicon/classifier-pr2.qza \
+--i-reads 2_table-rep/rep-seqs-dn-99.qza \
+--p-n-jobs 40 \
+--o-classification 4_taxon/taxonomy.qza
+
+# 耗时10分钟
+## 绘制物种注释柱状图(qzv结果文件可以在 https://view.qiime2.org/ 进行可视化)
+qiime taxa barplot \
+    --i-table 2_table-rep/feature-freauency-filtered-table-dn-99.qza \
+    --i-taxonomy 4_taxon/taxonomy.qza \
+    --o-visualization 4_taxon/bar-plots.table.qzv
+```
+
+## 特征表过滤（数据筛选）
+```{r eval=FALSE}
+# 偶然因素的过滤（过滤至少在2个样本中存在的feature，去除偶然的feature）
+qiime feature-table filter-features \         
+    --i-table 2_table-rep/table-dn-99.qza \
+    --p-min-samples 2 \
+    --o-filtered-table 2_table-rep/sample-contingency-filtered-table-dn-99.qza
+
+# 按特征表的数据链过滤，只有特征序列总测序量大于10以上的才保留
+qiime feature-table filter-features \         
+    --i-table 2_table-rep/sample-contingency-filtered-table-dn-99.qza \
+    --p-min-frequency 10 \
+    --o-filtered-table 2_table-rep/feature-freauency-filtered-table-dn-99.qza
+```
+#过滤污染物及未分类的 ASVs
+qiime taxa filter-table \
+   --i-table 2_table-rep/feature-freauency-filtered-table-dn-99.qza \
+   --i-taxonomy 4_taxon/taxonomy.qza \
+   --p-include D_1__ \
+   --p-exclude mitochondria,chloroplast \
+   --o-filtered-table 2_table-rep/feature-freauency-filtered-table-dn-99.qza
+
+
+## 取子集和汇总结果
+```{r eval=FALSE}
+qiime feature-table filter-seqs \
+   --i-data 2_table-rep/rep-seqs-dn-99.qza \
+   --i-table 2_table-rep/feature-freauency-filtered-table-dn-99.qza \
+   --o-filtered-data 2_table-rep/rep_seqs_final.qza
+```
+## 构建进化树
+
+```{r eval=FALSE}
+mkdir -p 3_align-to-tree
+qiime phylogeny align-to-tree-mafft-fasttree \
+--i-sequences 2_table-rep/rep_seqs_final.qza \
+--o-alignment 3_align-to-tree/aligned-rep-seqs.qza \
+--o-masked-alignment 3_align-to-tree/masked-aligned-rep-seqs.qza \
+--o-tree 3_align-to-tree/unrooted-tree.qza \
+--o-rooted-tree 3_align-to-tree/rooted-tree.qza \
+--p-n-threads 60
+```
+
+
+# 原始数据导出
+上面我们生成了一系列文件但都是qza格式，通过下面代码可以将其转换为常见的文本格式
+
+## 导出代表序列
+```ymal
+mkdir 5_export_res
+
+qiime tools export \
+--input-path 2_table-rep/rep_seqs_final.qza \
+--output-path ./5_export_res
+```
+## 导出特征表
+```{r eval=FALSE}
+#导出taxonomy
+qiime tools export \
+--input-path 4_taxon/taxonomy.qza \
+--output-path 4_taxon
+
+#改表头
+sed -i -e '1 s/Feature/#Feature/' -e '1 s/Taxon/taxonomy/' 4_taxon/taxonomy.tsv
+
+qiime tools export \
+   --input-path 2_table-rep/feature-freauency-filtered-table-dn-99.qza \
+   --output-path ./5_export_res
+
+#导出不带分类注释的asv表
+biom convert \
+   -i ./5_export_res/feature-table.biom \
+   -o ./5_export_res/feature_table.tsv \
+   --to-tsv
+
+#导出带分类注释的asv表
+biom add-metadata \
+   -i ./5_export_res/feature-table.biom \
+   -o ./5_export_res/feature-table_tax.biom \
+   --observation-metadata-fp 4_taxon/taxonomy.tsv \
+   --sc-separated taxonomy
+
+biom convert \
+   -i ./5_export_res/feature-table_tax.biom \
+   -o ./5_export_res/asv_table.tsv \
+   --to-tsv \
+   --header-key taxonomy
+```
+## 导出有根树
+```{r eval=FALSE}
+qiime tools export \
+    --input-path 3_align-to-tree/rooted-tree.qza \
+    --output-path ./5_export_res
+
+cd ./5_export_res; mv tree.nwk rooted_tree.nwk;cd .. 
+```
+
+
